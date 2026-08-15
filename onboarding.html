@@ -28,9 +28,19 @@
   button.primary {
     width: 100%; margin-top: 8px; padding: 10px; border-radius: 6px;
     background: var(--accent); border: none; color: #fff; font-size: 14px; cursor: pointer;
+    transition: all 0.2s ease;
   }
   button.primary:hover { filter: brightness(1.1); }
+  button.primary:disabled { cursor: not-allowed; opacity: 0.8; }
+  button.primary:disabled::before {
+    content: ''; display: inline-block; width: 12px; height: 12px;
+    border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    margin-right: 8px; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .status { display: none; text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; }
+  .status.error { color: #f85149; }
 </style>
 </head>
 <body>
@@ -90,16 +100,57 @@
 
     document.getElementById("start").addEventListener("click", async () => {
       const btn = document.getElementById("start");
+      const statusEl = document.getElementById("status");
+      const npmRegistry = customValue("npmRegistry");
+      const nodeMirror = customValue("nodeMirror");
+
+      if (document.getElementById("npmRegistry").value === "custom" && !npmRegistry) {
+        statusEl.style.display = "block";
+        statusEl.classList.add("error");
+        statusEl.textContent = "请填写自定义 npm 下载源 URL";
+        return;
+      }
+      if (document.getElementById("nodeMirror").value === "custom" && !nodeMirror) {
+        statusEl.style.display = "block";
+        statusEl.classList.add("error");
+        statusEl.textContent = "请填写自定义 Node.js 下载源 URL";
+        return;
+      }
+
       btn.disabled = true;
-      document.getElementById("status").style.display = "block";
-      document.getElementById("status").textContent = "正在保存配置并下载运行组件…";
+      btn.textContent = "准备中…";
+      statusEl.classList.remove("error");
+      statusEl.style.display = "block";
+      statusEl.textContent = "正在保存配置并准备下载…（即将切换到下载进度）";
       const settings = {
-        npmRegistry: customValue("npmRegistry"),
-        nodeMirror: customValue("nodeMirror"),
+        npmRegistry,
+        nodeMirror,
         workspace: document.getElementById("workspace").value.trim(),
         port: document.getElementById("port").value.trim(),
       };
-      window.dshOnboarding.start(settings);
+      try {
+        window.dshOnboarding.start(settings);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "开始下载并启动";
+        statusEl.classList.add("error");
+        statusEl.textContent = "启动失败：" + (err.message || err);
+        return;
+      }
+
+      let tick = 0;
+      const dots = [".", "..", "...", "...."];
+      const loaderTimer = setInterval(() => {
+        tick = (tick + 1) % dots.length;
+        btn.textContent = "正在切换到下载进度" + dots[tick];
+      }, 400);
+      setTimeout(() => {
+        clearInterval(loaderTimer);
+        if (btn.disabled) {
+          btn.textContent = "正在准备下载进度页…";
+          statusEl.textContent = "下载进度页加载中，如果长时间无响应请关闭后重试。";
+        }
+      }, 8000);
     });
   </script>
 </body>

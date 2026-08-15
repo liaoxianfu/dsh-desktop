@@ -13,7 +13,7 @@
        │         ├─ 本机有 node → 用之
        │         └─ 本机无 node → 下载便携版 Node.js（约 30MB，官方或国内镜像）
        │    → 定位 dsh
-       │         ├─ 本机已装（DSH_BIN / dsh-path.txt / which / npx 缓存）→ 用之
+       │         ├─ 本机已装（DSH_BIN / dsh-path.txt / which/where / npx 缓存）→ 用之
        │         └─ 未安装 → 询问后自动下载（npm install @deepseek-ai/dsh
        │                      到应用数据目录，含全部插件，首次约 100~200 MB）
        ├─ spawn `dsh web --port 3080`（工作目录 = $HOME 或 $DSH_APP_WORKSPACE；
@@ -24,9 +24,9 @@
 
 `dsh web` 本身内置了 SIGTERM/SIGINT 优雅关闭（dispose 整个 Cordis 插件树），所以"退出即停服务"在机制上是原生支持的，无需额外清理。端到端测试已验证：窗口关闭后 50ms 内 dsh 进程干净退出（code=0），端口释放、无残留进程。
 
-**完全自包含，连 Node 都不用装**：目标机器只要满足（1）网络、（2）`tar` 命令（Linux/macOS 自带），首次启动会自动补齐全部运行时：
-- **首次启动（需要下载时）先显示配置页**，选择下载源（官方/国内镜像/自定义）、工作目录、端口，点「开始下载」后进入下载流程
-- 无 `node` → 下载**便携版 Node.js**（LTS v22，官方源或国内镜像）到 `~/.config/Electron/dsh-runtime/node/`
+**完全自包含，连 Node 都不用装**：目标机器只需联网；Linux 使用系统的 `curl`/`tar`，Windows 使用 Electron 网络能力和 PowerShell `Expand-Archive`，首次启动会自动补齐全部运行时：
+- **首次启动（需要下载时）先显示配置页**，选择下载源（官方/国内镜像/自定义）、工作目录、端口；提交后显示当前步骤、百分比、下载量和 npm 实时输出
+- 无 `node` → 下载**便携版 Node.js**（LTS v22，官方源或国内镜像）到应用数据目录（Linux 默认 `~/.config/Electron/dsh-runtime/node/`，Windows 默认 `%APPDATA%\Electron\dsh-runtime\node`）
 - 无 `dsh` → 用便携 node 自带的 npm 下载 `@deepseek-ai/dsh`（含全部插件）
 - npm 安装、原生模块编译、dsh 运行全部使用便携 node，与系统环境完全隔离
 - 之后再次启动不再询问（配置已保存；下载内容复用）
@@ -71,7 +71,7 @@ npm start            # 启动应用（等价于 node_modules/.bin/electron main.
 | `DSH_APP_FORCE_DOWNLOAD` | `1` 时跳过"是否下载"询问直接下载（测试钩子） | 未设置 |
 | `DSH_APP_AUTOCLOSE_MS` | 就绪后 N 毫秒自动关窗（测试钩子） | 未设置 |
 
-dsh 可执行文件的探测顺序：`DSH_BIN` → `dsh-path.txt` → `which dsh` → `~/.npm/_npx/*/node_modules/.bin/dsh`。
+dsh 可执行文件的探测顺序：`DSH_BIN` → `dsh-path.txt` → Linux 的 `which dsh` / Windows 的 `where dsh.cmd` → npm/npx 缓存。自动下载的可执行文件在 Linux 为 `.bin/dsh`，Windows 为 `.bin/dsh.cmd`。
 
 ## 日志
 

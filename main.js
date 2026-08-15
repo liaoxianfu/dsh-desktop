@@ -88,12 +88,18 @@ let settingsWorkspace = "";
 
 function initRuntimePaths() {
   RUNTIME_DIR = setting("runtimeDir", "DSH_APP_RUNTIME_DIR", path.join(userDataDir, "dsh-runtime"));
-  RUNTIME_BIN = path.join(RUNTIME_DIR, "node_modules", ".bin", "dsh");
   DSH_NPM_SPEC = setting("dshSpec", "DSH_APP_DSH_SPEC", "@deepseek-ai/dsh@latest");
   NODE_MAJOR = setting("nodeMajor", "DSH_APP_NODE_MAJOR", "22");
   NODE_INSTALL_DIR = path.join(RUNTIME_DIR, "node");
-  NODE_BIN = path.join(NODE_INSTALL_DIR, "bin", "node");
-  NODE_NPM_CLI = path.join(NODE_INSTALL_DIR, "lib", "node_modules", "npm", "bin", "npm-cli.js");
+  if (process.platform === "win32") {
+    RUNTIME_BIN = path.join(RUNTIME_DIR, "node_modules", ".bin", "dsh.cmd");
+    NODE_BIN = path.join(NODE_INSTALL_DIR, "node.exe");
+    NODE_NPM_CLI = path.join(NODE_INSTALL_DIR, "node_modules", "npm", "bin", "npm-cli.js");
+  } else {
+    RUNTIME_BIN = path.join(RUNTIME_DIR, "node_modules", ".bin", "dsh");
+    NODE_BIN = path.join(NODE_INSTALL_DIR, "bin", "node");
+    NODE_NPM_CLI = path.join(NODE_INSTALL_DIR, "lib", "node_modules", "npm", "bin", "npm-cli.js");
+  }
   settingsPort = setting("port", "DSH_APP_PORT", "3080");
   settingsWorkspace = setting("workspace", "DSH_APP_WORKSPACE", "");
   log(`settings: port=${settingsPort} workspace=${settingsWorkspace || "(default)"} runtimeDir=${RUNTIME_DIR} npmRegistry=${resolveRegistry()}`);
@@ -143,6 +149,17 @@ function execFileUtf8(file, args, options = {}) {
   });
 }
 
+async function findExecutableOnPath(executable) {
+  const command = process.platform === "win32" ? "where" : "which";
+  try {
+    const { stdout } = await execFileUtf8(command, [executable], { timeout: 3000 });
+    const candidates = stdout.split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
+    return candidates.find((p) => fs.existsSync(p)) || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── port helpers ────────────────────────────────────────────────────────────
 
 function isPortOpen(port, host = "127.0.0.1", timeoutMs = 1500) {
@@ -180,7 +197,13 @@ function npxCacheProbe() {
   if (!fs.existsSync(npxRoot)) return null;
   let best = null;
   for (const dir of fs.readdirSync(npxRoot)) {
-    const candidate = path.join(npxRoot, dir, "node_modules", ".bin", "dsh");
+    const candidate = path.join(
+      npxRoot,
+      dir,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "dsh.cmd" : "dsh",
+    );
     if (fs.existsSync(candidate)) {
       const m = fs.statSync(candidate).mtimeMs;
       if (!best || m > best.m) best = { p: candidate, m };
@@ -199,11 +222,8 @@ async function findDshBin() {
     const p = fs.readFileSync(pinned, "utf8").trim();
     if (p && fs.existsSync(p)) return p;
   } catch { /* no pin file */ }
-  try {
-    const { stdout } = await execFileUtf8("which", ["dsh"], { timeout: 3000 });
-    const p = stdout.trim();
-    if (p && fs.existsSync(p)) return p;
-  } catch { /* not on PATH */ }
+  const found = await findExecutableOnPath(process.platform === "win32" ? "dsh.cmd" : "dsh");
+  if (found) return found;
   return npxCacheProbe();
 }
 
@@ -220,11 +240,27 @@ const NATIVE_SCRIPTS_PKGS = [
   "protobufjs",
 ];
 
-function updateLoading(msg) {
+let currentProgress = 0;
+let currentStep = "初始化中";
+let currentMessage = "正在准备运行环境…";
+
+function updateLoading(msg, progress, step) {
+  if (msg !== undefined) currentMessage = msg;
+  if (progress !== undefined) currentProgress = Math.max(0, Math.min(100, Math.round(progress)));
+  if (step !== undefined) currentStep = step;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents
-      .executeJavaScript(`document.getElementById('msg').textContent = ${JSON.stringify(msg)}`)
-      .catch(() => { /* page may still be loading */ });
+    mainWindow.webContents.executeJavaScript(`
+      (() => {
+        const msgEl = document.getElementById('msg');
+        const barEl = document.getElementById('progressBar');
+        const textEl = document.getElementById('progressText');
+        const stepEl = document.getElementById('stepLabel');
+        if (msgEl) msgEl.textContent = ${JSON.stringify(currentMessage)};
+        if (barEl) barEl.style.width = ${currentProgress} + '%';
+        if (textEl) textEl.textContent = ${currentProgress} + '%';
+        if (stepEl) stepEl.textContent = ${JSON.stringify(currentStep)};
+      })();
+    `).catch(() => { /* page may still be loading */ });
   }
 }
 
@@ -324,7 +360,11 @@ function fetchNodeVersion() {
       let body = "";
       res.on("data", (d) => { body += d; });
       res.on("end", () => {
-        const m = body.match(/node-v(\d+\.\d+\.\d+)-linux-x64\.tar\.xz/);
+        const arch = process.arch === "arm64" ? "arm64" : "x64";
+        const suffix = process.platform === "win32"
+          ? `-win-${arch}\\.zip`
+          : `-linux-${arch}\\.tar\\.xz`;
+        const m = body.match(new RegExp(`node-v(\\d+\\.\\d+\\.\\d+)${suffix}`));
         if (!m) return reject(new Error("无法解析 Node.js 最新版本"));
         resolve(m[1]);
       });
@@ -334,14 +374,95 @@ function fetchNodeVersion() {
   });
 }
 
-function downloadFile(url, dest, label) {
+function downloadFileWithNode(url, dest, label, progressStart, progressEnd, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const tmp = dest + ".part";
+    const start = progressStart ?? currentProgress;
+    const end = progressEnd ?? Math.min(100, start + 20);
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { fs.rmSync(tmp, { force: true }); } catch { /* ignore cleanup errors */ }
+      reject(err);
+    };
+    const request = (downloadUrl, remaining) => {
+      if (remaining < 0) return fail(new Error(`重定向次数过多: ${url}`));
+      const lib = downloadUrl.startsWith("https:") ? https : http;
+      const req = lib.get(downloadUrl, { headers: { "user-agent": "dsh-desktop" } }, (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+          const location = res.headers.location;
+          res.resume();
+          if (!location) return fail(new Error(`重定向缺少 Location: ${downloadUrl}`));
+          return request(new URL(location, downloadUrl).href, remaining - 1);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return fail(new Error(`下载 ${label} 失败: HTTP ${res.statusCode}`));
+        }
+        const totalBytes = Number(res.headers["content-length"]) || 0;
+        let downloadedBytes = 0;
+        let lastUpdate = 0;
+        const out = fs.createWriteStream(tmp);
+        out.on("error", fail);
+        res.on("error", fail);
+        out.on("finish", () => {
+          out.close(() => {
+            if (settled) return;
+            try {
+              if (!fs.existsSync(tmp) || fs.statSync(tmp).size === 0) {
+                throw new Error(`下载 ${label} 失败: 文件为空`);
+              }
+              fs.renameSync(tmp, dest);
+              settled = true;
+              resolve(dest);
+            } catch (err) {
+              fail(err);
+            }
+          });
+        });
+        res.on("data", (chunk) => {
+          downloadedBytes += chunk.length;
+          const now = Date.now();
+          if (now - lastUpdate < 200) return;
+          lastUpdate = now;
+          const downloadedMb = (downloadedBytes / 1024 / 1024).toFixed(1);
+          if (totalBytes > 0) {
+            const ratio = downloadedBytes / totalBytes;
+            const totalMb = (totalBytes / 1024 / 1024).toFixed(1);
+            updateLoading(
+              `正在下载 ${label}… ${downloadedMb}MB / ${totalMb}MB (${Math.round(ratio * 100)}%)`,
+              start + (end - start) * ratio,
+              `下载 ${label}`,
+            );
+          } else {
+            updateLoading(`正在下载 ${label}… ${downloadedMb}MB`, undefined, `下载 ${label}`);
+          }
+        });
+        res.pipe(out);
+      });
+      req.on("error", fail);
+      req.setTimeout(60_000, () => req.destroy(new Error(`下载 ${label} 超时`)));
+    };
+    request(url, redirectsLeft);
+  });
+}
+
+function downloadFile(url, dest, label, progressStart, progressEnd) {
+  const start = progressStart ?? currentProgress;
+  const end = progressEnd ?? Math.min(100, start + 20);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  updateLoading(`正在下载 ${label}…`, start, `下载 ${label}`);
+  // Packaged Windows apps cannot rely on curl being present or discoverable.
+  // Electron already provides a TLS-capable Node runtime, so use it there.
+  if (process.platform === "win32") {
+    return downloadFileWithNode(url, dest, label, start, end);
+  }
   // Use curl (present on Linux/macOS/Windows 10+) rather than Electron main
   // process https.get: curl handles redirects, proxies, TLS and retries
   // reliably, and is already proven to work in restricted environments.
   return new Promise((resolve, reject) => {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
     const tmp = dest + ".part";
-    updateLoading(`正在下载 ${label}…`);
     const child = spawn("curl", ["-L", "--fail", "--retry", "3", "--retry-delay", "1", "-sS", "-o", tmp, url], { stdio: "ignore" });
     child.on("error", reject);
     child.on("exit", (code) => {
@@ -349,6 +470,7 @@ function downloadFile(url, dest, label) {
       try { ok = code === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 0; } catch { /* ignore */ }
       if (ok) {
         fs.renameSync(tmp, dest);
+        updateLoading(`${label} 下载完成`, end, `下载 ${label}`);
         resolve(dest);
       } else {
         fs.rmSync(tmp, { force: true });
@@ -360,24 +482,55 @@ function downloadFile(url, dest, label) {
 
 async function downloadNode() {
   log("downloading portable Node.js…");
-  updateLoading("正在下载 Node.js 运行时（约 30MB）…");
+  updateLoading("正在下载 Node.js 运行时（约 30MB）…", 5, "下载 Node.js");
   const version = await fetchNodeVersion();
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const fname = `node-v${version}-linux-${arch}.tar.xz`;
-  const tarPath = path.join(RUNTIME_DIR, fname);
-  await downloadFile(`${resolveNodeBase()}v${version}/${fname}`, tarPath, "Node.js");
-  updateLoading("正在解压 Node.js 运行时…");
+  const fname = process.platform === "win32"
+    ? `node-v${version}-win-${arch}.zip`
+    : `node-v${version}-linux-${arch}.tar.xz`;
+  const archivePath = path.join(RUNTIME_DIR, fname);
+  await downloadFile(`${resolveNodeBase()}v${version}/${fname}`, archivePath, "Node.js", 5, 20);
+  updateLoading("正在解压 Node.js 运行时…", 20, "解压 Node.js");
   await new Promise((resolve, reject) => {
     fs.mkdirSync(NODE_INSTALL_DIR, { recursive: true });
-    const child = spawn("tar", ["-xJf", tarPath, "-C", NODE_INSTALL_DIR, "--strip-components=1"], { stdio: "ignore" });
+    if (process.platform === "win32") {
+      const psArchive = archivePath.replace(/'/g, "''");
+      const psDestination = RUNTIME_DIR.replace(/'/g, "''");
+      const command = `Expand-Archive -LiteralPath '${psArchive}' -DestinationPath '${psDestination}' -Force`;
+      const child = spawn(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", command],
+        { stdio: "ignore" },
+      );
+      child.on("error", reject);
+      child.on("exit", (code) => {
+        if (code !== 0) return reject(new Error(`PowerShell 解压失败 (${code})`));
+        try {
+          const extractedDir = path.join(RUNTIME_DIR, `node-v${version}-win-${arch}`);
+          if (!fs.existsSync(extractedDir)) throw new Error(`Node.js 解压目录不存在: ${extractedDir}`);
+          for (const item of fs.readdirSync(extractedDir)) {
+            const src = path.join(extractedDir, item);
+            const dest = path.join(NODE_INSTALL_DIR, item);
+            fs.rmSync(dest, { recursive: true, force: true });
+            fs.renameSync(src, dest);
+          }
+          fs.rmSync(extractedDir, { recursive: true, force: true });
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+      return;
+    }
+    const child = spawn("tar", ["-xJf", archivePath, "-C", NODE_INSTALL_DIR, "--strip-components=1"], { stdio: "ignore" });
     child.on("error", reject);
     child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`tar 解压失败 (${code})`))));
   });
-  fs.rmSync(tarPath, { force: true });
-  if (!fs.existsSync(NODE_BIN)) throw new Error("Node.js 解压后缺少可执行文件");
+  fs.rmSync(archivePath, { force: true });
+  if (!fs.existsSync(NODE_BIN)) throw new Error(`Node.js 解压后缺少可执行文件: ${NODE_BIN}`);
   const { stdout } = await execFileUtf8(NODE_BIN, ["--version"], { timeout: 5000 });
   log(`bundled node ready: ${stdout.trim()} @ ${NODE_BIN}`);
-  updateLoading("Node.js 运行时就绪");
+  updateLoading("Node.js 运行时就绪", 25, "Node.js 就绪");
 }
 
 async function ensureNode() {
@@ -414,14 +567,12 @@ async function ensureNode() {
     return NODE_BIN;
   }
   // System node.
-  try {
-    const { stdout } = await execFileUtf8("which", ["node"], { timeout: 3000 });
-    if (stdout.trim()) {
-      nodeMode = "system";
-      nodeBinPath = stdout.trim();
-      return nodeBinPath;
-    }
-  } catch { /* not on PATH */ }
+  const systemNode = await findExecutableOnPath(process.platform === "win32" ? "node.exe" : "node");
+  if (systemNode) {
+    nodeMode = "system";
+    nodeBinPath = systemNode;
+    return nodeBinPath;
+  }
   // No Node at all → offer to bundle one (skipped after onboarding approval).
   const force = process.env.DSH_APP_FORCE_DOWNLOAD === "1";
   if (!force && !onboardingApproved) {
@@ -444,8 +595,11 @@ async function ensureNode() {
   return downloadWithErrorHandling();
 }
 
-function runNpm(args) {
+function runNpm(args, progressStart, progressEnd, stepLabel) {
   return new Promise((resolve, reject) => {
+    const start = progressStart ?? currentProgress;
+    const end = progressEnd ?? Math.min(100, start + 40);
+    const label = stepLabel || "npm 操作";
     // Gentle network resilience: retry flaky registry fetches a few times.
     // Aggressive values (60s timeout × 5 retries) backfire badly on slow
     // mirrors by turning one hung request into many minutes of waiting.
@@ -463,25 +617,49 @@ function runNpm(args) {
       cmdArgs = fullArgs;
       log(`npm ${fullArgs.join(" ")} (system npm)`);
     }
-    const child = spawn(cmd, cmdArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    const spawnOptions = { stdio: ["ignore", "pipe", "pipe"] };
+    if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(cmd)) {
+      spawnOptions.shell = true;
+    }
+    updateLoading(`正在执行 npm ${args[0]}…`, start, label);
+    const child = spawn(cmd, cmdArgs, spawnOptions);
     const outLog = path.join(logDir, "dsh-download.log");
     const outStream = fs.createWriteStream(outLog, { flags: "a" });
+    outStream.on("error", () => { /* the UI still shows process output */ });
     let buf = "";
+    const startedAt = Date.now();
+    let lastProgress = start;
+    const progressTimer = setInterval(() => {
+      const elapsedRatio = Math.min(0.9, (Date.now() - startedAt) / 180_000);
+      const nextProgress = Math.round(start + (end - start) * elapsedRatio);
+      if (nextProgress > lastProgress) {
+        lastProgress = nextProgress;
+        updateLoading(undefined, nextProgress, label);
+      }
+    }, 1000);
     const onData = (d) => {
       const s = d.toString();
       try { outStream.write(s); } catch { /* log dir may be read-only */ }
       buf += s;
       const lines = buf.split("\n");
       buf = lines.pop();
-      const tail = lines.filter((l) => l.trim()).slice(-2).join("  ");
-      if (tail) updateLoading(`正在下载 dsh（首次需要几分钟）…\n${tail}`);
+      const tail = lines.filter((l) => l.trim()).slice(-3).join("\n");
+      if (tail) updateLoading(`${label}中…\n${tail}`, undefined, label);
     };
     child.stdout.on("data", onData);
     child.stderr.on("data", onData);
-    child.on("error", (err) => { try { outStream.end(); } catch { /* ignore */ } reject(err); });
-    child.on("exit", (code) => {
+    child.on("error", (err) => {
+      clearInterval(progressTimer);
       try { outStream.end(); } catch { /* ignore */ }
-      if (code === 0) resolve();
+      reject(err);
+    });
+    child.on("exit", (code) => {
+      clearInterval(progressTimer);
+      try { outStream.end(); } catch { /* ignore */ }
+      if (code === 0) {
+        updateLoading(undefined, end, label);
+        resolve();
+      }
       else reject(new Error(`npm ${args[0]} 退出码 ${code}，详见 ${outLog}`));
     });
   });
@@ -489,9 +667,16 @@ function runNpm(args) {
 
 async function downloadDsh() {
   const cacheFlag = process.env.DSH_APP_NPM_CACHE ? ["--cache", process.env.DSH_APP_NPM_CACHE] : [];
+  const baseProgress = currentProgress;
+  updateLoading("开始下载并安装 dsh…", baseProgress, "安装 dsh");
   // 1) plain install (on npm ≥12 the native install scripts are blocked, but
   //    every package still lands on disk)
-  await runNpm(["install", "--prefix", RUNTIME_DIR, "--no-audit", "--no-fund", DSH_NPM_SPEC, ...cacheFlag]);
+  await runNpm(
+    ["install", "--prefix", RUNTIME_DIR, "--no-audit", "--no-fund", DSH_NPM_SPEC, ...cacheFlag],
+    baseProgress,
+    baseProgress + 50,
+    "下载 dsh 包",
+  );
 
   // 2) approve the exact installed versions so their install scripts may run
   const allow = {};
@@ -507,16 +692,25 @@ async function downloadDsh() {
   );
 
   // 3) rebuild the native addons (compiles node-pty's pty.node, etc.)
-  await runNpm(["rebuild", "--prefix", RUNTIME_DIR, "--no-audit", "--no-fund", ...NATIVE_SCRIPTS_PKGS, ...cacheFlag]);
+  await runNpm(
+    ["rebuild", "--prefix", RUNTIME_DIR, "--no-audit", "--no-fund", ...NATIVE_SCRIPTS_PKGS, ...cacheFlag],
+    baseProgress + 50,
+    baseProgress + 70,
+    "编译原生模块",
+  );
 }
 
 async function ensureDshBin() {
   // 1) already installed somewhere on this machine
   const found = await findDshBin();
-  if (found) return found;
+  if (found) {
+    updateLoading(undefined, 75, "dsh 已就绪");
+    return found;
+  }
   // 2) a previously auto-downloaded runtime
   if (fs.existsSync(RUNTIME_BIN)) {
     log(`using previously downloaded runtime: ${RUNTIME_BIN}`);
+    updateLoading(undefined, 75, "dsh 已就绪");
     return RUNTIME_BIN;
   }
   // 3) ask to download (skipped when forced by env or after onboarding approval)
@@ -542,7 +736,7 @@ async function ensureDshBin() {
     }
     if (choice.response === 1) selectedRegistry = CN_REGISTRY;
   }
-  updateLoading("正在下载 dsh（首次需要几分钟）…");
+  updateLoading("正在下载 dsh（首次需要几分钟）…", currentProgress, "下载 dsh");
   try {
     await downloadDsh();
   } catch (err) {
@@ -559,10 +753,28 @@ async function ensureDshBin() {
     app.exit(1);
     return null;
   }
+  updateLoading("dsh 下载完成", 90, "dsh 就绪");
   return RUNTIME_BIN;
 }
 
 // ── server lifecycle ────────────────────────────────────────────────────────
+
+function resolveDshJs(dshBin) {
+  try {
+    if (process.platform === "win32" && /\.cmd$/i.test(dshBin)) {
+      const packageDir = path.resolve(path.dirname(dshBin), "..", "@deepseek-ai", "dsh");
+      const packageJson = path.join(packageDir, "package.json");
+      if (fs.existsSync(packageJson)) {
+        const pkg = JSON.parse(fs.readFileSync(packageJson, "utf8"));
+        const relativeBin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin && pkg.bin.dsh;
+        if (relativeBin) return path.join(packageDir, relativeBin);
+      }
+    }
+    return fs.realpathSync(dshBin);
+  } catch {
+    return dshBin;
+  }
+}
 
 function startServer(dshBin, port, workspace) {
   const outLog = path.join(logDir, "web.out.log");
@@ -570,7 +782,7 @@ function startServer(dshBin, port, workspace) {
   let args;
   if (nodeMode === "portable") {
     // Run dsh's bin.js with the bundled node (system node may not exist).
-    const dshJs = fs.realpathSync(dshBin);
+    const dshJs = resolveDshJs(dshBin);
     cmd = nodeBinPath;
     args = [dshJs, "web", "--port", String(port)];
     log(`spawning: ${nodeBinPath} ${dshJs} web --port ${port}  (cwd=${workspace})`);
@@ -579,14 +791,22 @@ function startServer(dshBin, port, workspace) {
     args = ["web", "--port", String(port)];
     log(`spawning: ${dshBin} web --port ${port}  (cwd=${workspace})`);
   }
-  dshProcess = spawn(cmd, args, {
+  updateLoading("正在启动 dsh 服务…", 93, "启动服务");
+  const spawnOptions = {
     cwd: workspace,
     env: { ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
-  });
+  };
+  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(cmd)) {
+    spawnOptions.shell = true;
+  }
+  dshProcess = spawn(cmd, args, spawnOptions);
   const outStream = fs.createWriteStream(outLog, { flags: "a" });
   dshProcess.stdout.pipe(outStream);
   dshProcess.stderr.pipe(outStream);
+  dshProcess.on("error", (err) => {
+    log(`failed to start dsh: ${err.message}`);
+  });
   dshProcess.on("exit", (code, signal) => {
     log(`dsh exited code=${code} signal=${signal}`);
     dshProcess = null;
@@ -608,8 +828,20 @@ function stopServer(done) {
   let settled = false;
   const finish = () => { if (!settled) { settled = true; done(); } };
   child.once("exit", finish);
-  log("sending SIGTERM to dsh…");
-  try { child.kill("SIGTERM"); } catch { return finish(); }
+  if (process.platform === "win32") {
+    log("stopping dsh process tree with taskkill…");
+    try {
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      killer.on("error", () => {
+        try { child.kill(); } catch { finish(); }
+      });
+    } catch {
+      try { child.kill(); } catch { return finish(); }
+    }
+  } else {
+    log("sending SIGTERM to dsh…");
+    try { child.kill("SIGTERM"); } catch { return finish(); }
+  }
   setTimeout(() => {
     try { child.kill("SIGKILL"); } catch { /* already gone */ }
   }, STOP_GRACE_MS);
@@ -620,10 +852,33 @@ function stopServer(done) {
 const LOADING_HTML =
   "<!doctype html><html><head><meta charset=\"utf-8\"><style>" +
   "body{display:flex;align-items:center;justify-content:center;height:100vh;margin:0;" +
-  "background:#0d1117;color:#c9d1d9;font:16px system-ui,sans-serif;flex-direction:column}" +
-  "p{white-space:pre-wrap;text-align:center;max-width:80%;color:#8b949e;font-size:13px}" +
+  "background:#0d1117;color:#c9d1d9;font:16px system-ui,sans-serif;padding:20px}" +
+  ".container{width:100%;max-width:520px}" +
+  ".title{font-size:18px;font-weight:600;margin-bottom:20px;text-align:center;color:#e6edf3}" +
+  ".step-label{font-size:13px;color:#8b949e;margin-bottom:8px}" +
+  ".progress-wrap{width:100%;height:8px;background:#30363d;border-radius:4px;overflow:hidden;margin-bottom:10px}" +
+  ".progress-bar{height:100%;background:linear-gradient(90deg,#2f81f7,#58a6ff);width:0;transition:width .3s ease;border-radius:4px}" +
+  ".progress-text{font-size:12px;color:#8b949e;text-align:right;margin-bottom:16px}" +
+  ".msg-box{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px;min-height:72px}" +
+  ".msg{white-space:pre-wrap;font-size:12px;color:#8b949e;line-height:1.6;margin:0;word-break:break-all}" +
+  ".spinner{display:inline-block;width:14px;height:14px;border:2px solid #30363d;border-top-color:#2f81f7;" +
+  "border-radius:50%;animation:spin .8s linear infinite;margin-right:8px;vertical-align:middle}" +
+  "@keyframes spin{to{transform:rotate(360deg)}}" +
   "</style></head>" +
-  "<body><div>DeepSeek Harness 正在启动…</div><p id=\"msg\"></p></body></html>";
+  "<body><div class=\"container\">" +
+  "<div class=\"title\"><span class=\"spinner\"></span>DeepSeek Harness 正在准备…</div>" +
+  "<div class=\"step-label\" id=\"stepLabel\">初始化中</div>" +
+  "<div class=\"progress-wrap\"><div class=\"progress-bar\" id=\"progressBar\"></div></div>" +
+  "<div class=\"progress-text\" id=\"progressText\">0%</div>" +
+  "<div class=\"msg-box\"><p class=\"msg\" id=\"msg\">正在准备运行环境…</p></div>" +
+  "</div></body></html>";
+
+function loadLoadingPage() {
+  return mainWindow
+    .loadURL("data:text/html;charset=utf-8," + encodeURIComponent(LOADING_HTML))
+    .then(() => updateLoading())
+    .catch(() => { /* window may be closing */ });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -633,13 +888,14 @@ function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: "#0d1117",
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
   mainWindow.on("closed", () => { mainWindow = null; });
-  mainWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(LOADING_HTML));
+  loadLoadingPage();
   return mainWindow;
 }
 
@@ -706,10 +962,7 @@ async function boot() {
 async function nodeReady() {
   if (process.env.DSH_APP_NODE_BIN && fs.existsSync(process.env.DSH_APP_NODE_BIN)) return true;
   if (fs.existsSync(NODE_BIN)) return true;
-  try {
-    const { stdout } = await execFileUtf8("which", ["node"], { timeout: 3000 });
-    return !!stdout.trim();
-  } catch { return false; }
+  return !!(await findExecutableOnPath(process.platform === "win32" ? "node.exe" : "node"));
 }
 
 // Do we have a usable dsh already?
@@ -746,12 +999,19 @@ function handleOnboardingStart(s) {
   initRuntimePaths(); // port / workspace may have been changed by the user
   const port = Number(settingsPort);
   const workspace = settingsWorkspace || os.homedir();
-  mainWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(LOADING_HTML));
-  bootstrap(port, workspace);
+  loadLoadingPage();
+  bootstrap(port, workspace).catch((err) => {
+    log(`bootstrap failed: ${err.stack || err.message}`);
+    dialog.showErrorBox("启动失败", `初始化过程出错: ${err.message}\n\n请查看日志了解详情。`);
+  });
 }
 
 // Download what's missing, then start the server and show the UI.
 async function bootstrap(port, workspace) {
+  currentProgress = 0;
+  currentStep = "初始化";
+  currentMessage = "正在准备运行环境…";
+  updateLoading("正在准备运行环境…", 0, "初始化");
   const node = await ensureNode();
   if (!node) return; // user chose to exit, or download failed (already handled)
   log(`node mode: ${nodeMode} (${node})`);
@@ -763,6 +1023,7 @@ async function bootstrap(port, workspace) {
   owned = true;
   const outLog = startServer(dshBin, port, workspace);
 
+  updateLoading("等待 dsh web 服务就绪…", 96, "启动服务");
   const ready = await waitForHttp(port, READY_TIMEOUT_MS);
   if (!ready) {
     dialog.showErrorBox(
@@ -772,6 +1033,7 @@ async function bootstrap(port, workspace) {
     stopServer(() => app.exit(1));
     return;
   }
+  updateLoading("启动完成！", 100, "完成");
   log("server ready");
   mainWindow.loadURL(`http://127.0.0.1:${port}`);
   scheduleAutoClose();
@@ -802,7 +1064,11 @@ if (!gotLock) {
     }
   });
 
-  app.whenReady().then(boot);
+  app.whenReady().then(boot).catch((err) => {
+    log(`boot failed: ${err.stack || err.message}`);
+    dialog.showErrorBox("启动失败", `应用初始化失败: ${err.message}\n\n请查看日志了解详情。`);
+    app.exit(1);
+  });
 
   app.on("before-quit", (event) => {
     if (quitting) return;

@@ -11,6 +11,9 @@ RUNTIME="$DIR/.test-runtime-ob"
 
 echo "== onboarding-e2e: port=$PORT =="
 mkdir -p "$XDG/Electron" "$TEST_HOME"
+# Keep the test repeatable: a previous run's saved sources would skip the
+# first-run page entirely, producing a false failure on subsequent runs.
+rm -f "$XDG/Electron/settings.json"
 rm -rf "$RUNTIME"
 
 DSH_HOME="$TEST_HOME" \
