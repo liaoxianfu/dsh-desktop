@@ -37,6 +37,13 @@
 
 ## 使用
 
+### 方式1 使用安装包
+
+下载地址：<https://github.com/liaoxianfu/dsh-desktop/releases>
+
+
+### 方式2 下载代码本地运行
+
 ```bash
 npm install          # 安装 electron
 ./setup.sh           # 固定 dsh 路径到 dsh-path.txt
@@ -51,7 +58,7 @@ npm start            # 启动应用（等价于 node_modules/.bin/electron main.
 
 ## 配置
 
-所有配置都可以在**设置窗口**里可视化编辑（应用菜单「DeepSeek Harness → 设置…」或快捷键 `Ctrl+,`），保存到 `~/.config/Electron/settings.json`，重启后生效。设置项包括：服务端口、工作目录、npm 下载源、Node.js 下载源、便携 Node 版本、运行时安装目录、dsh 包版本。
+配置文件在 `~/.config/Electron/settings.json`，重启后生效。设置项包括：服务端口、工作目录、npm 下载源、Node.js 下载源、便携 Node 版本、运行时安装目录、dsh 包版本。
 
 配置优先级：**环境变量 > 设置文件 > 默认值**。下表为环境变量（优先级最高，适合脚本化/自动化部署）：
 
@@ -113,9 +120,7 @@ npm run test:onboarding   # 首次引导：无 dsh 且未配置时显示配置�
 | Linux 通用 | `DeepSeek.Harness-0.1.0.AppImage` | `chmod +x` 后直接运行 |
 | Linux 通用 | `dsh-desktop-0.1.0.tar.gz` | 解压后运行 `./dsh-desktop`，无需安装 |
 
-下载地址：<https://github.com/liaoxianfu/dsh-desktop/releases>
 
-手动触发构建：仓库 Actions 页 → build → Run workflow。
 
 ### Arch Linux（本地构建 PKGBUILD）
 
