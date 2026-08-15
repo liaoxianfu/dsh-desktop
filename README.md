@@ -95,9 +95,26 @@ npm run test:onboarding   # 首次引导：无 dsh 且未配置时显示配置�
 - **不要调用 `app.setName()`**：它会重定向 Chromium 内部目录到新路径，在只读 HOME 下同样 SIGTRAP。
 - 日志目录名是 `Electron`（未 setName 时 Electron 默认值），不影响功能。
 
-## 打包分发（可选）
+## 打包分发
 
-### Arch Linux（原生包）
+### GitHub Releases（自动 CI 构建）
+
+项目托管在 GitHub，CI（GitHub Actions）在打 tag（`v*`）时自动构建并发布全平台安装包：
+
+| 平台 | 安装包 | 说明 |
+|---|---|---|
+| Windows | `DeepSeek.Harness.Setup.0.1.0.exe` | NSIS 安装器 |
+| Windows | `DeepSeek.Harness.0.1.0.exe` | 便携版（免安装） |
+| Debian/Ubuntu | `dsh-desktop_0.1.0_amd64.deb` | `sudo dpkg -i` 或 `apt install ./` |
+| Fedora/RHEL | `dsh-desktop-0.1.0.x86_64.rpm` | `sudo rpm -i` |
+| Arch Linux | `dsh-desktop-0.1.0-1-x86_64.pkg.tar.zst` | `sudo pacman -U` |
+| Linux 通用 | `DeepSeek.Harness-0.1.0.AppImage` | `chmod +x` 后直接运行 |
+
+下载地址：<https://github.com/liaoxianfu/dsh-desktop/releases>
+
+手动触发构建：仓库 Actions 页 → build → Run workflow。
+
+### Arch Linux（本地构建 PKGBUILD）
 
 ```bash
 cd packaging
@@ -106,12 +123,3 @@ sudo pacman -U dsh-desktop-0.1.0-1-x86_64.pkg.tar.zst
 ```
 
 依赖 Arch 官方仓库的 `electron`（当前为 43 大版本，与应用测试版本一致）、`curl`、`tar`。安装后应用菜单出现「DeepSeek Harness」。
-
-### AppImage（通用 Linux）
-
-需要进一步打包成 AppImage 时，安装 electron-builder 并配置 build 字段：
-
-```bash
-npm install --save-dev electron-builder
-npx electron-builder --linux AppImage
-```
