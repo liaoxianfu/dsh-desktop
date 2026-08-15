@@ -21,6 +21,7 @@ jobs:
       - run: npx electron-builder --linux deb rpm AppImage
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
@@ -43,6 +44,7 @@ jobs:
       - run: npx electron-builder --win nsis portable
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-packages
