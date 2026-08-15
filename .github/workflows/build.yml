@@ -1,0 +1,91 @@
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux (deb / rpm / AppImage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --linux deb rpm AppImage
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+          if-no-files-found: error
+
+  windows:
+    name: Windows (exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --win nsis portable
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: |
+            dist/*.exe
+          if-no-files-found: error
+
+  arch:
+    name: Arch Linux (pkg.tar.zst)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build in Arch container
+        run: |
+          docker run --rm -v "$PWD:/src" archlinux:latest bash -c "
+            set -e
+            pacman -Syu --noconfirm
+            pacman -S --noconfirm base-devel
+            useradd -m build
+            chown -R build:build /src
+            su build -c 'cd /src/packaging && ./build.sh'
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: packaging/*.pkg.tar.zst
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [linux, windows, arch]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/linux-packages/*
+            artifacts/windows-packages/*
+            artifacts/arch-package/*
+          generate_release_notes: true

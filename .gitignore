@@ -1,0 +1,28 @@
+# dependencies & build artifacts
+node_modules/
+dist/
+release/
+
+# npm/electron caches (local dev only)
+.npm-cache/
+.electron-cache/
+.electron-builder-cache/
+
+# packaging build artifacts
+packaging/src/
+packaging/pkg/
+packaging/*.pkg.tar.zst
+packaging/main.js
+packaging/preload.js
+packaging/settings.html
+packaging/onboarding.html
+
+# runtime download (test artifacts)
+.test-*/
+.xdg-*/
+.e2e-*.log
+dsh-path.txt
+
+# os / editor
+.DS_Store
+*.log

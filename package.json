@@ -1,0 +1,73 @@
+{
+  "name": "dsh-desktop",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness desktop shell: click to launch the web harness, close the window to stop it. Self-contained: auto-downloads Node.js & dsh on first run.",
+  "main": "main.js",
+  "author": "liaoxianfu <liaoxianfu555@outlook.com>",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron main.js",
+    "setup": "bash setup.sh",
+    "dist:linux": "electron-builder --linux deb rpm AppImage",
+    "dist:win": "electron-builder --win nsis portable",
+    "test:lifecycle": "node test-lifecycle.mjs",
+    "test:e2e": "bash test-e2e.sh",
+    "test:download": "bash test-download-e2e.sh",
+    "test:portable": "bash test-portable-e2e.sh",
+    "test:settings": "bash test-settings-e2e.sh",
+    "test:onboarding": "bash test-onboarding-e2e.sh"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.dsh.desktop",
+    "productName": "DeepSeek Harness",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js",
+      "settings.html",
+      "onboarding.html",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "rpm",
+        "AppImage"
+      ],
+      "category": "Development",
+      "maintainer": "liaoxianfu <liaoxianfu555@outlook.com>",
+      "synopsis": "DeepSeek Harness desktop shell"
+    },
+    "deb": {
+      "depends": [
+        "curl",
+        "tar"
+      ]
+    },
+    "rpm": {
+      "depends": [
+        "curl",
+        "tar"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}

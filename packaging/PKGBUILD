@@ -1,0 +1,38 @@
+# Maintainer: DeepSeek Harness user <your-email@example.com>
+# PKGBUILD for dsh-desktop — an Electron shell around `dsh web`.
+# First run auto-downloads a portable Node.js runtime and the dsh package
+# into the user data dir; the app itself is fully self-contained.
+
+pkgname=dsh-desktop
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="DeepSeek Harness desktop shell: click to launch the web harness, close the window to stop it. Auto-downloads Node.js & dsh on first run."
+arch=('x86_64')
+url="https://github.com/deepseek-ai/dsh"
+license=('MIT')
+depends=('electron' 'curl' 'tar')
+makedepends=()
+options=(!strip)
+source=(
+  "main.js"
+  "preload.js"
+  "settings.html"
+  "onboarding.html"
+  "deepseek-harness.desktop"
+  "dsh-desktop.svg"
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  # App sources
+  install -Dm755 "$srcdir/main.js" "$pkgdir/opt/dsh-desktop/main.js"
+  install -Dm644 "$srcdir/preload.js" "$pkgdir/opt/dsh-desktop/preload.js"
+  install -Dm644 "$srcdir/settings.html" "$pkgdir/opt/dsh-desktop/settings.html"
+  install -Dm644 "$srcdir/onboarding.html" "$pkgdir/opt/dsh-desktop/onboarding.html"
+
+  # Desktop entry & icon
+  install -Dm644 "$srcdir/deepseek-harness.desktop" \
+    "$pkgdir/usr/share/applications/deepseek-harness.desktop"
+  install -Dm644 "$srcdir/dsh-desktop.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/dsh-desktop.svg"
+}

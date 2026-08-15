@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DeepSeek Harness 首次配置</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  }
+  .card { width: 480px; max-width: 92vw; padding: 28px; }
+  h1 { font-size: 19px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; line-height: 1.6; }
+  .field { margin-bottom: 16px; }
+  label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+  input[type="text"], input[type="number"], select {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--panel); color: var(--fg); font-size: 13px;
+  }
+  input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 4px; line-height: 1.5; }
+  button.primary {
+    width: 100%; margin-top: 8px; padding: 10px; border-radius: 6px;
+    background: var(--accent); border: none; color: #fff; font-size: 14px; cursor: pointer;
+  }
+  button.primary:hover { filter: brightness(1.1); }
+  .status { display: none; text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>欢迎使用 DeepSeek Harness</h1>
+    <p class="sub">
+      首次使用需要下载运行组件（Node.js 运行时 + dsh，共约 400MB）。
+      请先选择下载源，网络在境内建议选择「国内镜像」。
+    </p>
+
+    <div class="field">
+      <label for="npmRegistry">npm 下载源（用于下载 dsh 及插件）</label>
+      <select id="npmRegistry">
+        <option value="" selected>默认（官方 registry.npmjs.org）</option>
+        <option value="cn">国内镜像（npmmirror.com，推荐）</option>
+        <option value="custom">自定义…</option>
+      </select>
+      <input type="text" id="npmRegistryCustom" placeholder="https://registry.example.com/" style="display:none;margin-top:6px">
+    </div>
+
+    <div class="field">
+      <label for="nodeMirror">Node.js 下载源（仅在需要下载 Node 时使用）</label>
+      <select id="nodeMirror">
+        <option value="" selected>默认（官方 nodejs.org）</option>
+        <option value="cn">国内镜像（npmmirror.com，推荐）</option>
+        <option value="custom">自定义…</option>
+      </select>
+      <input type="text" id="nodeMirrorCustom" placeholder="https://mirror.example.com/node/" style="display:none;margin-top:6px">
+    </div>
+
+    <div class="field">
+      <label for="workspace">工作目录（可选，留空 = 用户主目录）</label>
+      <input type="text" id="workspace" placeholder="$HOME">
+    </div>
+
+    <div class="field">
+      <label for="port">服务端口（可选，默认 3080）</label>
+      <input type="number" id="port" min="1" max="65535" placeholder="3080">
+    </div>
+
+    <button id="start" class="primary">开始下载并启动</button>
+    <div class="status" id="status">正在保存配置…</div>
+  </div>
+
+  <script>
+    function customValue(id) {
+      const sel = document.getElementById(id);
+      return sel.value === "custom" ? document.getElementById(id + "Custom").value.trim() : sel.value;
+    }
+
+    for (const id of ["npmRegistry", "nodeMirror"]) {
+      document.getElementById(id).addEventListener("change", (e) => {
+        const custom = document.getElementById(id + "Custom");
+        custom.style.display = e.target.value === "custom" ? "block" : "none";
+      });
+    }
+
+    document.getElementById("start").addEventListener("click", async () => {
+      const btn = document.getElementById("start");
+      btn.disabled = true;
+      document.getElementById("status").style.display = "block";
+      document.getElementById("status").textContent = "正在保存配置并下载运行组件…";
+      const settings = {
+        npmRegistry: customValue("npmRegistry"),
+        nodeMirror: customValue("nodeMirror"),
+        workspace: document.getElementById("workspace").value.trim(),
+        port: document.getElementById("port").value.trim(),
+      };
+      window.dshOnboarding.start(settings);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DeepSeek Harness
+Comment=DeepSeek Harness Web GUI — 点击启动，关闭窗口即停止
+Exec=/usr/bin/electron /opt/dsh-desktop/main.js
+Terminal=false
+Icon=dsh-desktop
+Categories=Development;Utility;
+StartupWMClass=electron

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DeepSeek Harness 设置</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --fg: #e6edf3; --muted: #8b949e; --accent: #2f81f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px;
+  }
+  h1 { font-size: 17px; margin: 0 0 16px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+  input[type="text"], input[type="number"], select {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--panel); color: var(--fg);
+    font-size: 13px;
+  }
+  input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 3px; line-height: 1.4; }
+  .status { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;
+    background: var(--panel); margin: 18px 0; font-size: 12px; line-height: 1.7; }
+  .status b { color: var(--fg); }
+  .buttons { display: flex; gap: 10px; justify-content: flex-end; }
+  button {
+    padding: 7px 16px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--fg); font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: #238636; color: #fff; padding: 8px 16px; border-radius: 6px;
+    font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <h1>DeepSeek Harness 设置</h1>
+
+  <div class="field">
+    <label for="port">服务端口</label>
+    <input type="number" id="port" min="1" max="65535" placeholder="3080">
+    <div class="hint">Web 界面监听端口。修改后需重启应用。</div>
+  </div>
+
+  <div class="field">
+    <label for="workspace">工作目录（workspace 根）</label>
+    <input type="text" id="workspace" placeholder="留空 = 用户主目录">
+    <div class="hint">dsh 以该目录为工作根目录。留空使用 $HOME。</div>
+  </div>
+
+  <div class="field">
+    <label for="npmRegistry">npm 下载源（用于下载 dsh）</label>
+    <select id="npmRegistry">
+      <option value="">默认（官方 registry.npmjs.org）</option>
+      <option value="cn">国内镜像（npmmirror.com）</option>
+      <option value="custom">自定义…</option>
+    </select>
+    <input type="text" id="npmRegistryCustom" placeholder="https://registry.example.com/" style="display:none;margin-top:6px">
+    <div class="hint">国内网络建议选择「国内镜像」，下载更快更稳。</div>
+  </div>
+
+  <div class="field">
+    <label for="nodeMirror">Node.js 下载源（便携运行时）</label>
+    <select id="nodeMirror">
+      <option value="">默认（官方 nodejs.org）</option>
+      <option value="cn">国内镜像（npmmirror.com）</option>
+      <option value="custom">自定义…</option>
+    </select>
+    <input type="text" id="nodeMirrorCustom" placeholder="https://mirror.example.com/node/" style="display:none;margin-top:6px">
+  </div>
+
+  <div class="field">
+    <label for="nodeMajor">便携 Node.js 大版本（LTS）</label>
+    <input type="text" id="nodeMajor" placeholder="22">
+  </div>
+
+  <div class="field">
+    <label for="runtimeDir">运行时安装目录</label>
+    <input type="text" id="runtimeDir" placeholder="留空 = 应用数据目录">
+    <div class="hint">Node 与 dsh 运行时安装位置。留空使用默认。</div>
+  </div>
+
+  <div class="field">
+    <label for="dshSpec">dsh 包版本（npm 包说明符）</label>
+    <input type="text" id="dshSpec" placeholder="@deepseek-ai/dsh@latest">
+  </div>
+
+  <div class="status" id="status">加载中…</div>
+
+  <div class="buttons">
+    <button id="cancel">取消</button>
+    <button id="save" class="primary">保存</button>
+  </div>
+
+  <div id="toast">已保存</div>
+
+  <script>
+    const FIELDS = ["port", "workspace", "nodeMajor", "runtimeDir", "dshSpec"];
+    const SELECTS = ["npmRegistry", "nodeMirror"];
+
+    function setSelect(id, value) {
+      const sel = document.getElementById(id);
+      if (value === "cn" || value === "npmmirror" || value === "") {
+        sel.value = value;
+      } else if (value && value !== "npmjs" && value !== "default" && value !== "official" && value !== "nodejs") {
+        sel.value = "custom";
+        const custom = document.getElementById(id + "Custom");
+        custom.style.display = "block";
+        custom.value = value;
+      } else {
+        sel.value = "";
+      }
+    }
+
+    async function init() {
+      let s = {};
+      try { s = await window.dshSettings.load(); } catch (e) { /* keep empty */ }
+      for (const id of FIELDS) {
+        document.getElementById(id).value = s[id] ?? "";
+      }
+      setSelect("npmRegistry", s.npmRegistry || "");
+      setSelect("nodeMirror", s.nodeMirror || "");
+
+      try {
+        const st = await window.dshSettings.status();
+        document.getElementById("status").innerHTML =
+          "当前运行模式：<b>" + (st.nodeMode || "-") + "</b><br>" +
+          "Node 运行时：<b>" + (st.nodeBin || "-") + "</b><br>" +
+          "dsh 可执行文件：<b>" + (st.dshBin || "-") + "</b><br>" +
+          "运行时目录：<b>" + (st.runtimeDir || "-") + "</b><br>" +
+          "服务端口：<b>" + (st.port || "-") + "</b><br>" +
+          "工作目录：<b>" + (st.workspace || "-") + "</b>";
+      } catch (e) { /* ignore */ }
+    }
+
+    for (const id of SELECTS) {
+      document.getElementById(id).addEventListener("change", (e) => {
+        const custom = document.getElementById(id + "Custom");
+        custom.style.display = e.target.value === "custom" ? "block" : "none";
+      });
+    }
+
+    document.getElementById("save").addEventListener("click", async () => {
+      const s = {};
+      for (const id of FIELDS) s[id] = document.getElementById(id).value.trim();
+      for (const id of SELECTS) {
+        const sel = document.getElementById(id);
+        const val = sel.value === "custom" ? document.getElementById(id + "Custom").value.trim() : sel.value;
+        s[id] = val;
+      }
+      try {
+        await window.dshSettings.save(s);
+        const toast = document.getElementById("toast");
+        toast.textContent = "已保存，重启应用后生效";
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 2500);
+      } catch (e) {
+        alert("保存失败：" + e.message);
+      }
+    });
+
+    document.getElementById("cancel").addEventListener("click", () => window.close());
+    init();
+  </script>
+</body>
+</html>
