@@ -4,6 +4,7 @@
   "description": "DeepSeek Harness desktop shell: click to launch the web harness, close the window to stop it. Self-contained: auto-downloads Node.js & dsh on first run.",
   "main": "main.js",
   "author": "liaoxianfu <liaoxianfu555@outlook.com>",
+  "homepage": "https://github.com/liaoxianfu/dsh-desktop",
   "license": "MIT",
   "scripts": {
     "start": "electron main.js",
@@ -44,7 +45,8 @@
       ],
       "category": "Development",
       "maintainer": "liaoxianfu <liaoxianfu555@outlook.com>",
-      "synopsis": "DeepSeek Harness desktop shell"
+      "synopsis": "DeepSeek Harness desktop shell",
+      "syncDesktopName": true
     },
     "deb": {
       "depends": [
