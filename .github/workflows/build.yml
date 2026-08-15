@@ -18,7 +18,7 @@ jobs:
       - run: npm ci
       - name: Install rpmbuild (for .rpm target)
         run: sudo apt-get update && sudo apt-get install -y rpm
-      - run: npx electron-builder --linux deb rpm AppImage
+      - run: npx electron-builder --linux deb rpm AppImage --publish never
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,7 +41,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx electron-builder --win nsis portable
+      - run: npx electron-builder --win nsis portable --publish never
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
