@@ -24,9 +24,9 @@
 
 `dsh web` 本身内置了 SIGTERM/SIGINT 优雅关闭（dispose 整个 Cordis 插件树），所以"退出即停服务"在机制上是原生支持的，无需额外清理。端到端测试已验证：窗口关闭后 50ms 内 dsh 进程干净退出（code=0），端口释放、无残留进程。
 
-**完全自包含，连 Node 都不用装**：目标机器只需联网；Linux 使用系统的 `curl`/`tar`，Windows 使用 Electron 网络能力和 PowerShell `Expand-Archive`，首次启动会自动补齐全部运行时：
+**完全自包含，连 Node 都不用装**：目标机器只需联网；Linux/macOS 使用系统的 `curl`/`tar`，Windows 使用 Electron 网络能力和 PowerShell `Expand-Archive`，首次启动会自动补齐全部运行时：
 - **首次启动（需要下载时）先显示配置页**，选择下载源（官方/国内镜像/自定义）、工作目录、端口；提交后显示当前步骤、百分比、下载量和 npm 实时输出
-- 无 `node` → 下载**便携版 Node.js**（LTS v22，官方源或国内镜像）到应用数据目录（Linux 默认 `~/.config/Electron/dsh-runtime/node/`，Windows 默认 `%APPDATA%\Electron\dsh-runtime\node`）
+- 无 `node` → 下载对应平台和 CPU 架构的**便携版 Node.js**（LTS v22，官方源或国内镜像）到应用数据目录（Linux 默认 `~/.config/Electron/dsh-runtime/node/`，Windows 默认 `%APPDATA%\Electron\dsh-runtime\node`）
 - 无 `dsh` → 用便携 node 自带的 npm 下载 `@deepseek-ai/dsh`（含全部插件）
 - npm 安装、原生模块编译、dsh 运行全部使用便携 node，与系统环境完全隔离
 - 之后再次启动不再询问（配置已保存；下载内容复用）
@@ -105,10 +105,13 @@ npm run test:onboarding   # 首次引导：无 dsh 且未配置时显示配置�
 |---|---|---|
 | Windows | `DeepSeek.Harness.Setup.0.1.0.exe` | NSIS 安装器 |
 | Windows | `DeepSeek.Harness.0.1.0.exe` | 便携版（免安装） |
+| macOS | `DeepSeek.Harness-0.1.0.dmg` | DMG 安装镜像（未签名） |
+| macOS | `DeepSeek.Harness-0.1.0-mac.zip` | ZIP 便携包（未签名） |
 | Debian/Ubuntu | `dsh-desktop_0.1.0_amd64.deb` | `sudo dpkg -i` 或 `apt install ./` |
 | Fedora/RHEL | `dsh-desktop-0.1.0.x86_64.rpm` | `sudo rpm -i` |
 | Arch Linux | `dsh-desktop-0.1.0-1-x86_64.pkg.tar.zst` | `sudo pacman -U` |
 | Linux 通用 | `DeepSeek.Harness-0.1.0.AppImage` | `chmod +x` 后直接运行 |
+| Linux 通用 | `dsh-desktop-0.1.0.tar.gz` | 解压后运行 `./dsh-desktop`，无需安装 |
 
 下载地址：<https://github.com/liaoxianfu/dsh-desktop/releases>
 

@@ -361,9 +361,10 @@ function fetchNodeVersion() {
       res.on("data", (d) => { body += d; });
       res.on("end", () => {
         const arch = process.arch === "arm64" ? "arm64" : "x64";
-        const suffix = process.platform === "win32"
-          ? `-win-${arch}\\.zip`
-          : `-linux-${arch}\\.tar\\.xz`;
+        let suffix;
+        if (process.platform === "win32") suffix = `-win-${arch}\\.zip`;
+        else if (process.platform === "darwin") suffix = `-darwin-${arch}\\.tar\\.gz`;
+        else suffix = `-linux-${arch}\\.tar\\.xz`;
         const m = body.match(new RegExp(`node-v(\\d+\\.\\d+\\.\\d+)${suffix}`));
         if (!m) return reject(new Error("无法解析 Node.js 最新版本"));
         resolve(m[1]);
@@ -485,9 +486,10 @@ async function downloadNode() {
   updateLoading("正在下载 Node.js 运行时（约 30MB）…", 5, "下载 Node.js");
   const version = await fetchNodeVersion();
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const fname = process.platform === "win32"
-    ? `node-v${version}-win-${arch}.zip`
-    : `node-v${version}-linux-${arch}.tar.xz`;
+  let fname;
+  if (process.platform === "win32") fname = `node-v${version}-win-${arch}.zip`;
+  else if (process.platform === "darwin") fname = `node-v${version}-darwin-${arch}.tar.gz`;
+  else fname = `node-v${version}-linux-${arch}.tar.xz`;
   const archivePath = path.join(RUNTIME_DIR, fname);
   await downloadFile(`${resolveNodeBase()}v${version}/${fname}`, archivePath, "Node.js", 5, 20);
   updateLoading("正在解压 Node.js 运行时…", 20, "解压 Node.js");
@@ -522,7 +524,8 @@ async function downloadNode() {
       });
       return;
     }
-    const child = spawn("tar", ["-xJf", archivePath, "-C", NODE_INSTALL_DIR, "--strip-components=1"], { stdio: "ignore" });
+    const tarMode = process.platform === "darwin" ? "-xzf" : "-xJf";
+    const child = spawn("tar", [tarMode, archivePath, "-C", NODE_INSTALL_DIR, "--strip-components=1"], { stdio: "ignore" });
     child.on("error", reject);
     child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`tar 解压失败 (${code})`))));
   });
