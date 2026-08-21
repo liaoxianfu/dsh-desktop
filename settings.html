@@ -187,17 +187,18 @@
           updateInfo.textContent = "检查更新失败：" + r.error;
           return;
         }
+        const srcLabel = r.source === "runtime" ? "（应用运行时）" : r.source === "system" ? "（系统安装）" : "";
         if (!r.current) {
           updateInfo.textContent = "尚未安装 dsh 运行时（首次启动时自动下载）。";
           return;
         }
         if (r.updateAvailable) {
           updateInfo.innerHTML =
-            "当前版本：<b>" + r.current + "</b>　最新版本：<b>" + r.latest + "</b>　<span style='color:#f0883e'>有新版本可更新</span>";
+            "当前版本：<b>" + r.current + "</b>" + srcLabel + "　最新版本：<b>" + r.latest + "</b>　<span style='color:#f0883e'>有新版本可更新</span>";
           doUpdateBtn.style.display = "inline-block";
         } else {
           updateInfo.innerHTML =
-            "当前版本：<b>" + r.current + "</b>　最新版本：<b>" + r.latest + "</b>　（已是最新）";
+            "当前版本：<b>" + r.current + "</b>" + srcLabel + "　最新版本：<b>" + r.latest + "</b>　（已是最新）";
           doUpdateBtn.style.display = "none";
         }
       } catch (e) {

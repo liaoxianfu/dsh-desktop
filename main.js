@@ -374,7 +374,7 @@ function registerIpc() {
       updateLoading("正在更新 dsh 运行时（可能需要几分钟）…");
       await downloadDsh();
       log("dsh runtime updated");
-      return { ok: true, version: getInstalledDshVersion() };
+      return { ok: true, version: await getActiveDshVersion() };
     } catch (err) {
       log(`dsh update failed: ${err.message}`);
       return { ok: false, error: err.message };
@@ -384,10 +384,35 @@ function registerIpc() {
 
 // ── dsh runtime versioning ───────────────────────────────────────────────────
 
-function getInstalledDshVersion() {
+// The dsh actually in use: the app-managed runtime wins once it exists
+// (it may have been updated from the settings window); otherwise a system
+// dsh (PATH / npx cache / DSH_BIN).
+async function resolveActiveDshBin() {
+  if (fs.existsSync(RUNTIME_BIN)) return { bin: RUNTIME_BIN, source: "runtime" };
+  const found = await findDshBin();
+  if (found) return { bin: found, source: "system" };
+  return { bin: null, source: "none" };
+}
+
+function dshVersionFromBin(bin) {
   try {
-    return require(path.join(RUNTIME_DIR, "node_modules", "@deepseek-ai", "dsh", "package.json")).version;
+    // RUNTIME_BIN → node_modules/@deepseek-ai/dsh/package.json;
+    // system .bin/dsh is a symlink to .../@deepseek-ai/dsh/lib/bin.js.
+    let pkgDir;
+    const real = fs.realpathSync(bin);
+    if (real.includes(`${path.sep}@deepseek-ai${path.sep}dsh${path.sep}`)) {
+      pkgDir = real.split(`${path.sep}@deepseek-ai${path.sep}dsh${path.sep}`)[0] +
+        `${path.sep}@deepseek-ai${path.sep}dsh`;
+    } else {
+      pkgDir = path.dirname(path.dirname(real));
+    }
+    return require(path.join(pkgDir, "package.json")).version;
   } catch { return null; }
+}
+
+async function getActiveDshVersion() {
+  const { bin } = await resolveActiveDshBin();
+  return bin ? dshVersionFromBin(bin) : null;
 }
 
 function npmViewVersion(spec) {
@@ -429,7 +454,8 @@ function compareVersions(a, b) {
 }
 
 async function checkDshUpdate() {
-  const current = getInstalledDshVersion();
+  const { source } = await resolveActiveDshBin();
+  const current = await getActiveDshVersion();
   let latest = null;
   let error = null;
   try {
@@ -438,8 +464,8 @@ async function checkDshUpdate() {
     error = err.message;
   }
   const updateAvailable = !!(current && latest && compareVersions(latest, current) > 0);
-  log(`dsh versions: current=${current || "none"} latest=${latest || "?"} updateAvailable=${updateAvailable}`);
-  return { current, latest, updateAvailable, error };
+  log(`dsh versions: source=${source} current=${current || "none"} latest=${latest || "?"} updateAvailable=${updateAvailable}`);
+  return { current, latest, updateAvailable, source, error };
 }
 
 // ── portable Node.js runtime ────────────────────────────────────────────────
@@ -806,17 +832,17 @@ async function downloadDsh() {
 }
 
 async function ensureDshBin() {
-  // 1) already installed somewhere on this machine
+  // 1) the app-managed runtime wins once it exists: it may have been updated
+  //    from the settings window to a newer version than the system dsh.
+  if (fs.existsSync(RUNTIME_BIN)) {
+    updateLoading(undefined, 75, "dsh 已就绪");
+    return RUNTIME_BIN;
+  }
+  // 2) otherwise use a dsh already installed on this machine
   const found = await findDshBin();
   if (found) {
     updateLoading(undefined, 75, "dsh 已就绪");
     return found;
-  }
-  // 2) a previously auto-downloaded runtime
-  if (fs.existsSync(RUNTIME_BIN)) {
-    log(`using previously downloaded runtime: ${RUNTIME_BIN}`);
-    updateLoading(undefined, 75, "dsh 已就绪");
-    return RUNTIME_BIN;
   }
   // 3) ask to download (skipped when forced by env or after onboarding approval)
   const force = process.env.DSH_APP_FORCE_DOWNLOAD === "1";
