@@ -300,11 +300,21 @@ function openSettings() {
   settingsWindow.on("closed", () => { settingsWindow = null; });
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
 function installMenu() {
   const template = [
     {
       label: "DeepSeek Harness",
       submenu: [
+        { label: "打开主界面", click: showMainWindow },
         { label: "设置…", accelerator: "CmdOrCtrl+,", click: openSettings },
         { type: "separator" },
         { label: "退出", role: "quit" },
@@ -319,6 +329,26 @@ function installMenu() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function setupTray() {
+  try {
+    const { Tray, Menu: TrayMenu, nativeImage } = require("electron");
+    const icon = nativeImage.createFromPath(path.join(__dirname, "..", "build", "icon.png"));
+    const tray = new Tray(icon.resize({ width: 22, height: 22 }));
+    tray.setToolTip("DeepSeek Harness");
+    tray.setContextMenu(TrayMenu.buildFromTemplate([
+      { label: "打开主界面", click: showMainWindow },
+      { label: "设置…", click: openSettings },
+      { type: "separator" },
+      { label: "退出", click: () => app.quit() },
+    ]));
+    log("tray icon ready");
+  } catch (err) {
+    // Tray is a nice-to-have; some desktop environments (e.g. bare Wayland)
+    // provide no status-notifier service, so a failure must not break the app.
+    log(`tray unavailable: ${err.message}`);
+  }
 }
 
 function registerIpc() {
@@ -960,7 +990,6 @@ function createWindow() {
     width: 1440,
     height: 900,
     title: "DeepSeek Harness",
-    autoHideMenuBar: true,
     backgroundColor: "#0d1117",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -979,6 +1008,7 @@ async function boot() {
   initRuntimePaths();
   registerIpc();
   installMenu();
+  setupTray();
   const port = Number(settingsPort);
   const workspace = settingsWorkspace || os.homedir();
 
