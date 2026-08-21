@@ -75,6 +75,11 @@ function setting(name, envVar, fallback) {
   return fallback;
 }
 
+function booleanSetting(name, envVar, fallback = true) {
+  const value = setting(name, envVar, fallback ? "true" : "false").trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(value);
+}
+
 // Runtime paths depend on settings; resolved once at boot via initRuntimePaths().
 let RUNTIME_DIR = path.join(userDataDir, "dsh-runtime");
 let RUNTIME_BIN = path.join(RUNTIME_DIR, "node_modules", ".bin", "dsh");
@@ -103,6 +108,10 @@ function initRuntimePaths() {
   settingsPort = setting("port", "DSH_APP_PORT", "3080");
   settingsWorkspace = setting("workspace", "DSH_APP_WORKSPACE", "");
   log(`settings: port=${settingsPort} workspace=${settingsWorkspace || "(default)"} runtimeDir=${RUNTIME_DIR} npmRegistry=${resolveRegistry()}`);
+}
+
+function runtimeBinFor(dir) {
+  return path.join(dir, "node_modules", ".bin", process.platform === "win32" ? "dsh.cmd" : "dsh");
 }
 
 // ── portable Node.js ─────────────────────────────────────────────────────────
@@ -372,7 +381,7 @@ function registerIpc() {
   ipcMain.handle("dsh:update", async () => {
     try {
       updateLoading("正在更新 dsh 运行时（可能需要几分钟）…");
-      await downloadDsh();
+      await updateDshRuntime({ progressStart: 0, progressEnd: 100 });
       log("dsh runtime updated");
       return { ok: true, version: await getActiveDshVersion() };
     } catch (err) {
@@ -406,7 +415,9 @@ function dshVersionFromBin(bin) {
     } else {
       pkgDir = path.dirname(path.dirname(real));
     }
-    return require(path.join(pkgDir, "package.json")).version;
+    // Do not use require(): its module cache would keep reporting the old
+    // version after npm replaces the package during an in-process update.
+    return JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
   } catch { return null; }
 }
 
@@ -415,7 +426,7 @@ async function getActiveDshVersion() {
   return bin ? dshVersionFromBin(bin) : null;
 }
 
-function npmViewVersion(spec) {
+function npmViewVersion(spec, { timeoutMs = 45_000 } = {}) {
   return new Promise((resolve, reject) => {
     const netArgs = ["--fetch-retries", "2", "--fetch-timeout", "20000"];
     const cacheFlag = process.env.DSH_APP_NPM_CACHE ? ["--cache", process.env.DSH_APP_NPM_CACHE] : [];
@@ -429,43 +440,120 @@ function npmViewVersion(spec) {
       cmd = process.platform === "win32" ? "npm.cmd" : "npm";
       cmdArgs = args;
     }
-    const child = spawn(cmd, cmdArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    const spawnOptions = { stdio: ["ignore", "pipe", "pipe"] };
+    if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(cmd)) spawnOptions.shell = true;
+    const child = spawn(cmd, cmdArgs, spawnOptions);
     let out = "";
+    let settled = false;
+    const finish = (err, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch { /* process may already have exited */ }
+      finish(new Error(`npm view 超时（${Math.round(timeoutMs / 1000)}s）`));
+    }, timeoutMs);
     child.stdout.on("data", (d) => { out += d; });
-    child.on("error", reject);
+    child.on("error", (err) => finish(err));
     child.on("exit", (code) => {
-      if (code === 0) resolve(out.trim().split(/\s+/).pop() || null);
-      else reject(new Error(`npm view 退出码 ${code}`));
+      if (code === 0) finish(null, out.trim().split(/\s+/).pop() || null);
+      else finish(new Error(`npm view 退出码 ${code}`));
     });
   });
 }
 
 function compareVersions(a, b) {
-  // Compare numeric dotted segments; drop -rc/pre suffixes ("0.1.1-rc.2" → 0.1.1).
-  const pa = String(a || "").split("-")[0].split(".").map(Number);
-  const pb = String(b || "").split("-")[0].split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] || 0;
-    const y = pb[i] || 0;
+  const parse = (value) => {
+    const [withoutBuild] = String(value || "").replace(/^v/, "").split("+");
+    const [core, prerelease = ""] = withoutBuild.split("-", 2);
+    return {
+      core: core.split(".").map((part) => Number(part) || 0),
+      prerelease: prerelease ? prerelease.split(".") : [],
+    };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < Math.max(pa.core.length, pb.core.length); i++) {
+    const x = pa.core[i] || 0;
+    const y = pb.core[i] || 0;
     if (x > y) return 1;
     if (x < y) return -1;
+  }
+  // Per semver, a stable release is newer than a prerelease with equal core.
+  if (!pa.prerelease.length && pb.prerelease.length) return 1;
+  if (pa.prerelease.length && !pb.prerelease.length) return -1;
+  for (let i = 0; i < Math.max(pa.prerelease.length, pb.prerelease.length); i++) {
+    if (pa.prerelease[i] === undefined) return -1;
+    if (pb.prerelease[i] === undefined) return 1;
+    const x = pa.prerelease[i];
+    const y = pb.prerelease[i];
+    if (x === y) continue;
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) return Number(x) > Number(y) ? 1 : -1;
+    if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
+    return x > y ? 1 : -1;
   }
   return 0;
 }
 
-async function checkDshUpdate() {
+async function checkDshUpdate(options) {
   const { source } = await resolveActiveDshBin();
   const current = await getActiveDshVersion();
   let latest = null;
   let error = null;
   try {
-    latest = await npmViewVersion(DSH_NPM_SPEC);
+    latest = await npmViewVersion(DSH_NPM_SPEC, options);
   } catch (err) {
     error = err.message;
   }
   const updateAvailable = !!(current && latest && compareVersions(latest, current) > 0);
   log(`dsh versions: source=${source} current=${current || "none"} latest=${latest || "?"} updateAvailable=${updateAvailable}`);
   return { current, latest, updateAvailable, source, error };
+}
+
+async function maybeAutoUpdateDsh(dshBin) {
+  if (!booleanSetting("autoUpdateDsh", "DSH_APP_AUTO_UPDATE", true)) {
+    log("dsh automatic update disabled");
+    return dshBin;
+  }
+
+  updateLoading("正在检查 dsh 运行时更新…", 76, "检查更新");
+  // Keep startup responsive when the registry is unreachable. A failed check
+  // must never prevent the already-installed runtime from starting.
+  const result = await checkDshUpdate({ timeoutMs: 10_000 });
+  if (result.error) {
+    log(`dsh automatic update check failed, continuing with ${result.current || "installed version"}: ${result.error}`);
+    updateLoading("更新检查失败，继续使用现有 dsh 运行时", 78, "跳过更新");
+    return dshBin;
+  }
+  if (!result.updateAvailable) {
+    log(`dsh runtime is current (${result.current || "unknown"})`);
+    updateLoading(`dsh ${result.current || "运行时"} 已是最新版本`, 80, "dsh 已就绪");
+    return dshBin;
+  }
+
+  log(`automatically updating dsh runtime: ${result.current} -> ${result.latest}`);
+  updateLoading(
+    `发现 dsh ${result.latest}，正在自动更新（当前 ${result.current}）…`,
+    80,
+    "自动更新 dsh",
+  );
+  try {
+    await updateDshRuntime({ progressStart: 80, progressEnd: 92 });
+    if (!fs.existsSync(RUNTIME_BIN)) throw new Error(`更新后缺少可执行文件: ${RUNTIME_BIN}`);
+    const installed = dshVersionFromBin(RUNTIME_BIN);
+    log(`dsh automatic update complete: ${result.current} -> ${installed || result.latest}`);
+    updateLoading(`dsh 已自动更新到 ${installed || result.latest}`, 92, "更新完成");
+    return RUNTIME_BIN;
+  } catch (err) {
+    log(`dsh automatic update failed, continuing with existing runtime: ${err.message}`);
+    updateLoading("自动更新失败，继续使用现有 dsh 运行时", 92, "跳过更新");
+    return dshBin;
+  }
 }
 
 // ── portable Node.js runtime ────────────────────────────────────────────────
@@ -796,16 +884,21 @@ function runNpm(args, progressStart, progressEnd, stepLabel) {
   });
 }
 
-async function downloadDsh() {
+async function downloadDsh({
+  progressStart = currentProgress,
+  progressEnd = 90,
+  targetDir = RUNTIME_DIR,
+} = {}) {
   const cacheFlag = process.env.DSH_APP_NPM_CACHE ? ["--cache", process.env.DSH_APP_NPM_CACHE] : [];
-  const baseProgress = currentProgress;
+  const baseProgress = progressStart;
+  const packageEnd = baseProgress + (progressEnd - baseProgress) * (5 / 7);
   updateLoading("开始下载并安装 dsh…", baseProgress, "安装 dsh");
   // 1) plain install (on npm ≥12 the native install scripts are blocked, but
   //    every package still lands on disk)
   await runNpm(
-    ["install", "--prefix", RUNTIME_DIR, "--no-audit", "--no-fund", DSH_NPM_SPEC, ...cacheFlag],
+    ["install", "--prefix", targetDir, "--no-audit", "--no-fund", DSH_NPM_SPEC, ...cacheFlag],
     baseProgress,
-    baseProgress + 50,
+    packageEnd,
     "下载 dsh 包",
   );
 
@@ -813,22 +906,80 @@ async function downloadDsh() {
   const allow = {};
   for (const name of NATIVE_SCRIPTS_PKGS) {
     try {
-      const version = require(path.join(RUNTIME_DIR, "node_modules", name, "package.json")).version;
+      const version = JSON.parse(fs.readFileSync(
+        path.join(targetDir, "node_modules", name, "package.json"),
+        "utf8",
+      )).version;
       allow[`${name}@${version}`] = true;
     } catch { /* not installed; nothing to approve */ }
   }
   fs.writeFileSync(
-    path.join(RUNTIME_DIR, "package.json"),
+    path.join(targetDir, "package.json"),
     JSON.stringify({ private: true, allowScripts: allow }, null, 2),
   );
 
   // 3) rebuild the native addons (compiles node-pty's pty.node, etc.)
   await runNpm(
-    ["rebuild", "--prefix", RUNTIME_DIR, "--no-audit", "--no-fund", ...NATIVE_SCRIPTS_PKGS, ...cacheFlag],
-    baseProgress + 50,
-    baseProgress + 70,
+    ["rebuild", "--prefix", targetDir, "--no-audit", "--no-fund", ...NATIVE_SCRIPTS_PKGS, ...cacheFlag],
+    packageEnd,
+    progressEnd,
     "编译原生模块",
   );
+}
+
+async function updateDshRuntime({ progressStart = currentProgress, progressEnd = 90 } = {}) {
+  const stageDir = path.join(RUNTIME_DIR, ".dsh-update");
+  const backupDir = path.join(RUNTIME_DIR, ".dsh-update-backup");
+  const artifacts = ["node_modules", "package.json", "package-lock.json"];
+  fs.rmSync(stageDir, { recursive: true, force: true });
+  fs.rmSync(backupDir, { recursive: true, force: true });
+  fs.mkdirSync(stageDir, { recursive: true });
+  let keepBackup = false;
+
+  try {
+    await downloadDsh({ progressStart, progressEnd, targetDir: stageDir });
+    const stagedBin = runtimeBinFor(stageDir);
+    if (!fs.existsSync(stagedBin)) throw new Error(`下载完成但缺少可执行文件: ${stagedBin}`);
+
+    // npm install/rebuild completed in isolation. Switch the small set of dsh
+    // artifacts synchronously, keeping the previous runtime available for a
+    // rollback if any rename fails.
+    fs.mkdirSync(backupDir, { recursive: true });
+    const backedUp = [];
+    const activated = [];
+    try {
+      for (const name of artifacts) {
+        const current = path.join(RUNTIME_DIR, name);
+        if (!fs.existsSync(current)) continue;
+        fs.renameSync(current, path.join(backupDir, name));
+        backedUp.push(name);
+      }
+      for (const name of artifacts) {
+        const staged = path.join(stageDir, name);
+        if (!fs.existsSync(staged)) continue;
+        fs.renameSync(staged, path.join(RUNTIME_DIR, name));
+        activated.push(name);
+      }
+    } catch (err) {
+      for (const name of activated.reverse()) {
+        fs.rmSync(path.join(RUNTIME_DIR, name), { recursive: true, force: true });
+      }
+      try {
+        for (const name of backedUp.reverse()) {
+          fs.renameSync(path.join(backupDir, name), path.join(RUNTIME_DIR, name));
+        }
+      } catch (rollbackErr) {
+        // Keep the backup on disk for manual recovery rather than deleting the
+        // last known-good runtime in the outer finally block.
+        keepBackup = true;
+        throw new Error(`${err.message}; 回滚失败: ${rollbackErr.message}; 备份位于 ${backupDir}`);
+      }
+      throw err;
+    }
+  } finally {
+    fs.rmSync(stageDir, { recursive: true, force: true });
+    if (!keepBackup) fs.rmSync(backupDir, { recursive: true, force: true });
+  }
 }
 
 async function ensureDshBin() {
@@ -1147,8 +1298,13 @@ async function bootstrap(port, workspace) {
   if (!node) return; // user chose to exit, or download failed (already handled)
   log(`node mode: ${nodeMode} (${node})`);
 
-  const dshBin = await ensureDshBin();
+  // Remember whether dsh existed before ensureDshBin(): a first-time install
+  // already uses the configured latest spec and should not immediately query
+  // the registry a second time.
+  const existingDsh = await resolveActiveDshBin();
+  let dshBin = await ensureDshBin();
   if (!dshBin) return; // user chose to exit, or download failed (already handled)
+  if (existingDsh.bin) dshBin = await maybeAutoUpdateDsh(dshBin);
   log(`dsh binary: ${dshBin}`);
 
   owned = true;

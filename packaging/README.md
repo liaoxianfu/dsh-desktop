@@ -9,12 +9,12 @@ cd dsh-desktop/packaging
 ./build.sh          # 复制应用源文件 + makepkg（跳过依赖检查）
 ```
 
-产物：`dsh-desktop-0.1.0-1-x86_64.pkg.tar.zst`
+产物：`dsh-desktop-0.1.3-1-x86_64.pkg.tar.zst`
 
 ## 安装
 
 ```bash
-sudo pacman -U dsh-desktop-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U dsh-desktop-0.1.3-1-x86_64.pkg.tar.zst
 ```
 
 依赖（`pacman` 会自动安装，需要联网）：

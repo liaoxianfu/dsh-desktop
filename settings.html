@@ -17,6 +17,7 @@
   h1 { font-size: 17px; margin: 0 0 16px; }
   .field { margin-bottom: 14px; }
   label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+  label.checkbox { display: flex; align-items: center; gap: 7px; color: var(--fg); font-size: 13px; }
   input[type="text"], input[type="number"], select {
     width: 100%; padding: 7px 9px; border: 1px solid var(--border);
     border-radius: 6px; background: var(--panel); color: var(--fg);
@@ -92,6 +93,14 @@
     <input type="text" id="dshSpec" placeholder="@deepseek-ai/dsh@latest">
   </div>
 
+  <div class="field">
+    <label class="checkbox" for="autoUpdateDsh">
+      <input type="checkbox" id="autoUpdateDsh">
+      启动时自动更新 dsh 运行时
+    </label>
+    <div class="hint">默认开启。检查或更新失败时仍会使用当前版本启动。</div>
+  </div>
+
   <div class="status" id="status">加载中…</div>
 
   <div class="field" style="border-top:1px solid var(--border);padding-top:14px">
@@ -134,6 +143,8 @@
       }
       setSelect("npmRegistry", s.npmRegistry || "");
       setSelect("nodeMirror", s.nodeMirror || "");
+      document.getElementById("autoUpdateDsh").checked =
+        s.autoUpdateDsh !== false && s.autoUpdateDsh !== "false";
 
       try {
         const st = await window.dshSettings.status();
@@ -162,6 +173,7 @@
         const val = sel.value === "custom" ? document.getElementById(id + "Custom").value.trim() : sel.value;
         s[id] = val;
       }
+      s.autoUpdateDsh = document.getElementById("autoUpdateDsh").checked;
       try {
         await window.dshSettings.save(s);
         const toast = document.getElementById("toast");

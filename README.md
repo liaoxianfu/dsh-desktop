@@ -16,6 +16,7 @@
        │         ├─ 本机已装（DSH_BIN / dsh-path.txt / which/where / npx 缓存）→ 用之
        │         └─ 未安装 → 询问后自动下载（npm install @deepseek-ai/dsh
        │                      到应用数据目录，含全部插件，首次约 100~200 MB）
+       ├─ 已安装 dsh → 启动前自动检查并更新运行时（可在设置中关闭）
        ├─ spawn `dsh web --port 3080`（工作目录 = $HOME 或 $DSH_APP_WORKSPACE；
        │   无系统 node 时用便携 node 运行）
        ├─ 轮询 HTTP 端点就绪后，BrowserWindow 加载 http://127.0.0.1:3080
@@ -58,11 +59,13 @@ npm start            # 启动应用（等价于 node_modules/.bin/electron main.
 
 ## 配置
 
-配置文件在 `~/.config/Electron/settings.json`，重启后生效。设置项包括：服务端口、工作目录、npm 下载源、Node.js 下载源、便携 Node 版本、运行时安装目录、dsh 包版本。
+配置文件在 `~/.config/Electron/settings.json`，重启后生效。设置项包括：服务端口、工作目录、npm 下载源、Node.js 下载源、便携 Node 版本、运行时安装目录、dsh 包版本、启动时自动更新。
 
 ## 更新 dsh 运行时
 
-dsh 运行时（首次启动自动下载的 `@deepseek-ai/dsh` 包）**不会自动升级**。更新方式：
+dsh 运行时（首次启动自动下载的 `@deepseek-ai/dsh` 包）默认会在每次启动服务前检查新版本；发现新版本后自动下载、编译原生模块，并直接用新版本启动。检查最长等待 10 秒，检查或更新失败不会阻塞启动，而是继续使用现有版本。
+
+可在设置窗口取消勾选「启动时自动更新 dsh 运行时」。手动更新方式：
 
 1. 打开设置窗口（应用菜单「设置…」或 `Ctrl+,`）
 2. 底部「dsh 运行时更新」→ 点「检查更新」查看当前/最新版本
@@ -89,6 +92,7 @@ rm -rf ~/.config/Electron/dsh-runtime
 | `DSH_BIN` | 显式指定 dsh 可执行文件路径 | 自动探测 |
 | `DSH_APP_RUNTIME_DIR` | 自动下载的 dsh 安装目录 | `~/.config/Electron/dsh-runtime` |
 | `DSH_APP_DSH_SPEC` | 自动下载的 npm 包说明符 | `@deepseek-ai/dsh@latest` |
+| `DSH_APP_AUTO_UPDATE` | 启动时自动检查并更新 dsh；设为 `0`/`false`/`off` 可关闭 | 开启 |
 | `DSH_APP_NPM_REGISTRY` | 自动下载用的 npm 源：完整 URL，或别名 `cn`/`npmmirror`（国内镜像）、`npmjs`/`default`（官方源） | 官方源（首次下载弹窗可选国内镜像） |
 | `DSH_APP_NODE_MIRROR` | 便携 Node 的下载源：完整 URL，或别名 `cn`/`npmmirror`（国内镜像）、`official`/`nodejs`（官方源） | 官方源 |
 | `DSH_APP_NODE_MAJOR` | 便携 Node 的大版本线（LTS） | `22` |
@@ -130,15 +134,15 @@ npm run test:onboarding   # 首次引导：无 dsh 且未配置时显示配置�
 
 | 平台 | 安装包 | 说明 |
 |---|---|---|
-| Windows | `DeepSeek.Harness.Setup.0.1.2.exe` | NSIS 安装器 |
-| Windows | `DeepSeek.Harness.0.1.2.exe` | 便携版（免安装） |
-| macOS | `DeepSeek.Harness-0.1.2.dmg` | DMG 安装镜像（未签名） |
-| macOS | `DeepSeek.Harness-0.1.2-mac.zip` | ZIP 便携包（未签名） |
-| Debian/Ubuntu | `dsh-desktop_0.1.2_amd64.deb` | `sudo dpkg -i` 或 `apt install ./` |
-| Fedora/RHEL | `dsh-desktop-0.1.2.x86_64.rpm` | `sudo rpm -i` |
-| Arch Linux | `dsh-desktop-0.1.2-1-x86_64.pkg.tar.zst` | `sudo pacman -U` |
-| Linux 通用 | `DeepSeek.Harness-0.1.2.AppImage` | `chmod +x` 后直接运行 |
-| Linux 通用 | `dsh-desktop-0.1.2.tar.gz` | 解压后运行 `./dsh-desktop`，无需安装 |
+| Windows | `DeepSeek.Harness.Setup.0.1.3.exe` | NSIS 安装器 |
+| Windows | `DeepSeek.Harness.0.1.3.exe` | 便携版（免安装） |
+| macOS | `DeepSeek.Harness-0.1.3.dmg` | DMG 安装镜像（未签名） |
+| macOS | `DeepSeek.Harness-0.1.3-mac.zip` | ZIP 便携包（未签名） |
+| Debian/Ubuntu | `dsh-desktop_0.1.3_amd64.deb` | `sudo dpkg -i` 或 `apt install ./` |
+| Fedora/RHEL | `dsh-desktop-0.1.3.x86_64.rpm` | `sudo rpm -i` |
+| Arch Linux | `dsh-desktop-0.1.3-1-x86_64.pkg.tar.zst` | `sudo pacman -U` |
+| Linux 通用 | `DeepSeek.Harness-0.1.3.AppImage` | `chmod +x` 后直接运行 |
+| Linux 通用 | `dsh-desktop-0.1.3.tar.gz` | 解压后运行 `./dsh-desktop`，无需安装 |
 
 
 
@@ -147,7 +151,7 @@ npm run test:onboarding   # 首次引导：无 dsh 且未配置时显示配置�
 ```bash
 cd packaging
 ./build.sh                                    # 生成 dsh-desktop-*.pkg.tar.zst
-sudo pacman -U dsh-desktop-0.1.2-1-x86_64.pkg.tar.zst
+sudo pacman -U dsh-desktop-0.1.3-1-x86_64.pkg.tar.zst
 ```
 
 依赖 Arch 官方仓库的 `electron`（当前为 43 大版本，与应用测试版本一致）、`curl`、`tar`。安装后应用菜单出现「DeepSeek Harness」。
