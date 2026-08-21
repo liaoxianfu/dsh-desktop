@@ -4,7 +4,7 @@
 # into the user data dir; the app itself is fully self-contained.
 
 pkgname=dsh-desktop
-pkgver=0.1.0
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="DeepSeek Harness desktop shell: click to launch the web harness, close the window to stop it. Auto-downloads Node.js & dsh on first run."
 arch=('x86_64')

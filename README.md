@@ -130,15 +130,15 @@ npm run test:onboarding   # 首次引导：无 dsh 且未配置时显示配置�
 
 | 平台 | 安装包 | 说明 |
 |---|---|---|
-| Windows | `DeepSeek.Harness.Setup.0.1.0.exe` | NSIS 安装器 |
-| Windows | `DeepSeek.Harness.0.1.0.exe` | 便携版（免安装） |
-| macOS | `DeepSeek.Harness-0.1.0.dmg` | DMG 安装镜像（未签名） |
-| macOS | `DeepSeek.Harness-0.1.0-mac.zip` | ZIP 便携包（未签名） |
-| Debian/Ubuntu | `dsh-desktop_0.1.0_amd64.deb` | `sudo dpkg -i` 或 `apt install ./` |
-| Fedora/RHEL | `dsh-desktop-0.1.0.x86_64.rpm` | `sudo rpm -i` |
-| Arch Linux | `dsh-desktop-0.1.0-1-x86_64.pkg.tar.zst` | `sudo pacman -U` |
-| Linux 通用 | `DeepSeek.Harness-0.1.0.AppImage` | `chmod +x` 后直接运行 |
-| Linux 通用 | `dsh-desktop-0.1.0.tar.gz` | 解压后运行 `./dsh-desktop`，无需安装 |
+| Windows | `DeepSeek.Harness.Setup.0.1.2.exe` | NSIS 安装器 |
+| Windows | `DeepSeek.Harness.0.1.2.exe` | 便携版（免安装） |
+| macOS | `DeepSeek.Harness-0.1.2.dmg` | DMG 安装镜像（未签名） |
+| macOS | `DeepSeek.Harness-0.1.2-mac.zip` | ZIP 便携包（未签名） |
+| Debian/Ubuntu | `dsh-desktop_0.1.2_amd64.deb` | `sudo dpkg -i` 或 `apt install ./` |
+| Fedora/RHEL | `dsh-desktop-0.1.2.x86_64.rpm` | `sudo rpm -i` |
+| Arch Linux | `dsh-desktop-0.1.2-1-x86_64.pkg.tar.zst` | `sudo pacman -U` |
+| Linux 通用 | `DeepSeek.Harness-0.1.2.AppImage` | `chmod +x` 后直接运行 |
+| Linux 通用 | `dsh-desktop-0.1.2.tar.gz` | 解压后运行 `./dsh-desktop`，无需安装 |
 
 
 
@@ -147,7 +147,7 @@ npm run test:onboarding   # 首次引导：无 dsh 且未配置时显示配置�
 ```bash
 cd packaging
 ./build.sh                                    # 生成 dsh-desktop-*.pkg.tar.zst
-sudo pacman -U dsh-desktop-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U dsh-desktop-0.1.2-1-x86_64.pkg.tar.zst
 ```
 
 依赖 Arch 官方仓库的 `electron`（当前为 43 大版本，与应用测试版本一致）、`curl`、`tar`。安装后应用菜单出现「DeepSeek Harness」。
