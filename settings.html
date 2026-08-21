@@ -94,6 +94,13 @@
 
   <div class="status" id="status">加载中…</div>
 
+  <div class="field" style="border-top:1px solid var(--border);padding-top:14px">
+    <label>dsh 运行时更新</label>
+    <div id="updateInfo" style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:8px">检查中…</div>
+    <button id="checkUpdate">检查更新</button>
+    <button id="doUpdate" class="primary" style="display:none">更新到最新版</button>
+  </div>
+
   <div class="buttons">
     <button id="cancel">取消</button>
     <button id="save" class="primary">保存</button>
@@ -167,6 +174,64 @@
     });
 
     document.getElementById("cancel").addEventListener("click", () => window.close());
+
+    // ── dsh runtime update ──────────────────────────────────────────────────
+    const updateInfo = document.getElementById("updateInfo");
+    const checkUpdateBtn = document.getElementById("checkUpdate");
+    const doUpdateBtn = document.getElementById("doUpdate");
+
+    async function refreshUpdateInfo() {
+      try {
+        const r = await window.dshUpdate.check();
+        if (r.error) {
+          updateInfo.textContent = "检查更新失败：" + r.error;
+          return;
+        }
+        if (!r.current) {
+          updateInfo.textContent = "尚未安装 dsh 运行时（首次启动时自动下载）。";
+          return;
+        }
+        if (r.updateAvailable) {
+          updateInfo.innerHTML =
+            "当前版本：<b>" + r.current + "</b>　最新版本：<b>" + r.latest + "</b>　<span style='color:#f0883e'>有新版本可更新</span>";
+          doUpdateBtn.style.display = "inline-block";
+        } else {
+          updateInfo.innerHTML =
+            "当前版本：<b>" + r.current + "</b>　最新版本：<b>" + r.latest + "</b>　（已是最新）";
+          doUpdateBtn.style.display = "none";
+        }
+      } catch (e) {
+        updateInfo.textContent = "检查更新失败：" + e.message;
+      }
+    }
+
+    checkUpdateBtn.addEventListener("click", async () => {
+      updateInfo.textContent = "检查中…";
+      await refreshUpdateInfo();
+    });
+
+    doUpdateBtn.addEventListener("click", async () => {
+      doUpdateBtn.disabled = true;
+      checkUpdateBtn.disabled = true;
+      updateInfo.textContent = "正在更新（下载并编译原生模块，可能需要几分钟）…";
+      try {
+        const r = await window.dshUpdate.update();
+        if (r.ok) {
+          updateInfo.innerHTML = "更新完成：<b>" + r.version + "</b>。请<b>重启应用</b>使新版本生效。";
+          doUpdateBtn.style.display = "none";
+        } else {
+          updateInfo.textContent = "更新失败：" + r.error;
+          doUpdateBtn.disabled = false;
+          checkUpdateBtn.disabled = false;
+        }
+      } catch (e) {
+        updateInfo.textContent = "更新失败：" + e.message;
+        doUpdateBtn.disabled = false;
+        checkUpdateBtn.disabled = false;
+      }
+    });
+
+    refreshUpdateInfo();
     init();
   </script>
 </body>

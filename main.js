@@ -338,6 +338,78 @@ function registerIpc() {
     workspace: settingsWorkspace || os.homedir(),
   }));
   ipcMain.on("onboarding:start", (_e, s) => handleOnboardingStart(s));
+  ipcMain.handle("dsh:check-update", () => checkDshUpdate());
+  ipcMain.handle("dsh:update", async () => {
+    try {
+      updateLoading("正在更新 dsh 运行时（可能需要几分钟）…");
+      await downloadDsh();
+      log("dsh runtime updated");
+      return { ok: true, version: getInstalledDshVersion() };
+    } catch (err) {
+      log(`dsh update failed: ${err.message}`);
+      return { ok: false, error: err.message };
+    }
+  });
+}
+
+// ── dsh runtime versioning ───────────────────────────────────────────────────
+
+function getInstalledDshVersion() {
+  try {
+    return require(path.join(RUNTIME_DIR, "node_modules", "@deepseek-ai", "dsh", "package.json")).version;
+  } catch { return null; }
+}
+
+function npmViewVersion(spec) {
+  return new Promise((resolve, reject) => {
+    const netArgs = ["--fetch-retries", "2", "--fetch-timeout", "20000"];
+    const cacheFlag = process.env.DSH_APP_NPM_CACHE ? ["--cache", process.env.DSH_APP_NPM_CACHE] : [];
+    const args = ["view", spec, "version", "--registry", resolveRegistry(), ...cacheFlag, ...netArgs];
+    let cmd;
+    let cmdArgs;
+    if (nodeMode === "portable") {
+      cmd = nodeBinPath;
+      cmdArgs = [NODE_NPM_CLI, ...args];
+    } else {
+      cmd = process.platform === "win32" ? "npm.cmd" : "npm";
+      cmdArgs = args;
+    }
+    const child = spawn(cmd, cmdArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve(out.trim().split(/\s+/).pop() || null);
+      else reject(new Error(`npm view 退出码 ${code}`));
+    });
+  });
+}
+
+function compareVersions(a, b) {
+  // Compare numeric dotted segments; drop -rc/pre suffixes ("0.1.1-rc.2" → 0.1.1).
+  const pa = String(a || "").split("-")[0].split(".").map(Number);
+  const pb = String(b || "").split("-")[0].split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+async function checkDshUpdate() {
+  const current = getInstalledDshVersion();
+  let latest = null;
+  let error = null;
+  try {
+    latest = await npmViewVersion(DSH_NPM_SPEC);
+  } catch (err) {
+    error = err.message;
+  }
+  const updateAvailable = !!(current && latest && compareVersions(latest, current) > 0);
+  log(`dsh versions: current=${current || "none"} latest=${latest || "?"} updateAvailable=${updateAvailable}`);
+  return { current, latest, updateAvailable, error };
 }
 
 // ── portable Node.js runtime ────────────────────────────────────────────────

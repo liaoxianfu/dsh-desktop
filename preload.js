@@ -15,3 +15,9 @@ contextBridge.exposeInMainWorld("dshSettings", {
 contextBridge.exposeInMainWorld("dshOnboarding", {
   start: (settings) => ipcRenderer.send("onboarding:start", settings),
 });
+
+// dsh runtime update check / update.
+contextBridge.exposeInMainWorld("dshUpdate", {
+  check: () => ipcRenderer.invoke("dsh:check-update"),
+  update: () => ipcRenderer.invoke("dsh:update"),
+});
